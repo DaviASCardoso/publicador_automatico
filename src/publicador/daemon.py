@@ -12,7 +12,7 @@ import json
 import logging
 import shutil
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -164,6 +164,28 @@ def _publicar(video: Path, config: AppConfig, legenda: str) -> None:
         _gravar_sidecar_falha(destino, resultados)
 
 
+def _horario_pendente(
+    horarios: list[str], hora_atual: str, hoje: date
+) -> str | None:
+    """O horário mais antigo já vencido (<= hora_atual) que ainda não foi
+    publicado hoje, ou None se nenhum estiver pendente.
+
+    "<=" (não "==") para não perder o horário se o vídeo ainda estiver sendo
+    copiado ou faltando exatamente no minuto configurado: o daemon continua
+    tentando a cada tick até publicar (e marcar o estado) ou até o dia virar.
+    Se o daemon ficar fora do ar e vários horários vencerem juntos, um por
+    tick é resolvido, na ordem — o próximo tick já pega o horário seguinte.
+    """
+    pendentes = sorted(
+        h
+        for h in horarios
+        if h <= hora_atual and not state.ja_publicou_neste_horario(
+            paths.STATE_PATH, hoje, h
+        )
+    )
+    return pendentes[0] if pendentes else None
+
+
 def _tick(
     config_atual: AppConfig | None, legenda_atual: str | None
 ) -> tuple[AppConfig | None, str | None]:
@@ -184,16 +206,16 @@ def _tick(
     agora = datetime.now(_TZ_SAO_PAULO)
     hora_atual = agora.strftime("%H:%M")
 
-    # ">=" (não "==") para não perder o dia inteiro se o vídeo ainda estiver
-    # sendo copiado ou faltando exatamente no minuto configurado: o daemon
-    # continua tentando a cada tick até publicar (e marcar o estado) ou até
-    # o dia virar.
-    ja_publicou = state.ja_publicou_hoje(paths.STATE_PATH, agora.date())
-    if hora_atual >= config_atual.horario_publicacao and not ja_publicou:
+    horario = _horario_pendente(
+        config_atual.horarios_publicacao, hora_atual, agora.date()
+    )
+    if horario is not None:
         video = proximo_video(paths.A_POSTAR)
         if video is None:
             logger.info(
-                "Horário de publicação chegou, mas não há vídeos em 'a postar'"
+                "Horário de publicação %s chegou, mas não há vídeos em "
+                "'a postar'",
+                horario,
             )
         elif not arquivo_esta_estavel(video):
             logger.info(
@@ -206,7 +228,7 @@ def _tick(
                 _publicar(video, config_atual, legenda_atual or "")
             except Exception:
                 logger.exception("Erro inesperado ao publicar %s", video.name)
-            state.marcar_publicado_hoje(paths.STATE_PATH, agora.date())
+            state.marcar_publicado(paths.STATE_PATH, agora.date(), horario)
 
     return config_atual, legenda_atual
 

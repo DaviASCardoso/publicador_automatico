@@ -23,7 +23,7 @@ PlataformaConhecida = Literal["youtube", "tiktok"]
 
 
 class AppConfig(BaseModel):
-    horario_publicacao: str
+    horarios_publicacao: list[str] = Field(min_length=1)
     plataformas_ativas: list[PlataformaConhecida] = Field(
         default_factory=lambda: ["youtube", "tiktok"], min_length=1
     )
@@ -40,10 +40,30 @@ class AppConfig(BaseModel):
         | None
     ) = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migra_horario_singular(cls, data: object) -> object:
+        """Compatibilidade com configs antigos: horario_publicacao (string,
+        um só horário) vira horarios_publicacao com um item só."""
+        if (
+            isinstance(data, dict)
+            and "horarios_publicacao" not in data
+            and "horario_publicacao" in data
+        ):
+            data = dict(data)
+            data["horarios_publicacao"] = [data.pop("horario_publicacao")]
+        return data
+
     @model_validator(mode="after")
-    def _valida_horario(self) -> AppConfig:
-        if not _HORARIO_RE.match(self.horario_publicacao):
-            raise ValueError('horario_publicacao deve estar no formato "HH:MM"')
+    def _valida_horarios(self) -> AppConfig:
+        for horario in self.horarios_publicacao:
+            if not _HORARIO_RE.match(horario):
+                raise ValueError(
+                    f'horarios_publicacao contém "{horario}", que não está '
+                    'no formato "HH:MM"'
+                )
+        if len(set(self.horarios_publicacao)) != len(self.horarios_publicacao):
+            raise ValueError("horarios_publicacao não pode ter horários repetidos")
         return self
 
     @model_validator(mode="after")

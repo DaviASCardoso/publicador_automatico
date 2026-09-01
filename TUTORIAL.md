@@ -206,7 +206,7 @@ Em `/srv/publicador/config.json` (crie se ainda não existir):
 
 ```json
 {
-  "horario_publicacao": "18:00",
+  "horarios_publicacao": ["09:00", "18:00"],
   "plataformas_ativas": ["youtube", "tiktok"],
   "privacy_status_youtube": "private",
   "retencao_postados_dias": 7,
@@ -215,7 +215,15 @@ Em `/srv/publicador/config.json` (crie se ainda não existir):
 }
 ```
 
-- `horario_publicacao`: `"HH:MM"`, 24h.
+- `horarios_publicacao`: lista de horários `"HH:MM"` (24h) em que o daemon
+  deve publicar por dia. Um vídeo por horário — se colocar dois horários,
+  como no exemplo acima, o daemon publica dois vídeos por dia (o mais antigo
+  de `a postar/` em cada horário que chegar); com um só, continua publicando
+  um vídeo por dia como antes. Não pode ficar vazia nem ter horários
+  repetidos. Configs antigos que ainda usam a chave singular
+  `"horario_publicacao": "18:00"` continuam funcionando sem alteração: o
+  daemon migra automaticamente para `"horarios_publicacao": ["18:00"]` ao
+  carregar.
 - `plataformas_ativas`: lista com as plataformas em que o daemon deve
   publicar — aceita `"youtube"` e `"tiktok"`. Não pode ficar vazia. Se a
   chave for omitida, o padrão é as duas ativas (`["youtube", "tiktok"]`), pra

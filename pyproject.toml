@@ -1,7 +1,7 @@
 [project]
 name = "publicador"
 version = "0.1.0"
-description = "Daemon que publica automaticamente um vídeo por dia no YouTube e no TikTok"
+description = "Daemon que publica automaticamente vídeos no YouTube e no TikTok em horários configuráveis"
 requires-python = ">=3.12"
 dependencies = [
     "google-api-python-client>=2.140",
