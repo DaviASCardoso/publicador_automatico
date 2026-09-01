@@ -20,7 +20,7 @@ from publicador import ledger, paths, state
 from publicador.config import AppConfig, load_config
 from publicador.file_watcher import arquivo_esta_estavel, proximo_video
 from publicador.logging_setup import setup_logging
-from publicador.providers.base import PublishResult
+from publicador.providers.base import PublisherProvider, PublishResult
 from publicador.providers.tiktok import TikTokProvider
 from publicador.providers.youtube import YouTubeProvider
 
@@ -60,13 +60,11 @@ def _mover(origem: Path, destino_dir: Path) -> Path:
     return destino
 
 
-def _gravar_sidecar_falha(
-    destino: Path, youtube: PublishResult, tiktok: PublishResult
-) -> None:
+def _gravar_sidecar_falha(destino: Path, resultados: dict[str, PublishResult]) -> None:
     sidecar = destino.with_name(destino.name + ".json")
     sidecar.write_text(
         json.dumps(
-            {"youtube": youtube.model_dump(), "tiktok": tiktok.model_dump()},
+            {p: r.model_dump() for p, r in resultados.items()},
             ensure_ascii=False,
             indent=2,
         ),
@@ -87,59 +85,83 @@ def _resultado_anterior(
     return PublishResult.model_validate(dados)
 
 
+def _credenciais_faltando(plataforma: str) -> list[Path]:
+    return [
+        caminho
+        for caminho in paths.CREDENCIAIS_POR_PLATAFORMA[plataforma]
+        if not caminho.exists()
+    ]
+
+
+def _construir_provider(plataforma: str, config: AppConfig) -> PublisherProvider:
+    if plataforma == "youtube":
+        return YouTubeProvider(
+            tokens_path=paths.TOKENS_YOUTUBE_PATH,
+            client_secret_path=paths.CLIENT_SECRET_PATH,
+            privacy_status=config.privacy_status_youtube,
+        )
+    if plataforma == "tiktok":
+        return TikTokProvider(
+            tokens_path=paths.TOKENS_TIKTOK_PATH,
+            app_credentials_path=paths.TIKTOK_APP_CREDENTIALS_PATH,
+            direct_post_enabled=config.tiktok_direct_post_enabled,
+            privacy_level=config.tiktok_privacy_level,
+        )
+    raise ValueError(f"Plataforma desconhecida: {plataforma}")
+
+
 def _publicar(video: Path, config: AppConfig, legenda: str) -> None:
     hash_arquivo = ledger.calcular_hash(video)
     entrada_existente = ledger.buscar_publicacao(paths.LEDGER_PATH, hash_arquivo)
-    if ledger.ja_publicado_com_sucesso(entrada_existente):
+    if ledger.ja_publicado_com_sucesso(entrada_existente, config.plataformas_ativas):
         logger.info(
-            "%s já publicado antes (hash duplicado no ledger), movendo para "
-            "postados/ sem republicar",
+            "%s já publicado antes (hash duplicado no ledger) em todas as "
+            "plataformas ativas, movendo para postados/ sem republicar",
             video.name,
         )
         _mover(video, paths.POSTADOS)
         return
 
     titulo = video.stem
+    resultados: dict[str, PublishResult] = {}
 
-    # Reprocessamento sem duplicar: se uma tentativa anterior (registrada no
-    # ledger por hash) já teve sucesso numa das duas plataformas, não
-    # reenvia pra ela — só tenta de novo a que falhou.
-    resultado_youtube = _resultado_anterior(entrada_existente, "youtube")
-    if resultado_youtube is None:
-        youtube_provider = YouTubeProvider(
-            tokens_path=paths.TOKENS_YOUTUBE_PATH,
-            client_secret_path=paths.CLIENT_SECRET_PATH,
-            privacy_status=config.privacy_status_youtube,
-        )
-        resultado_youtube = youtube_provider.publish(video, titulo, legenda)
-    else:
-        logger.info("%s já tinha sucesso no YouTube, não reenviando", video.name)
+    # Filtro logo no início: só entram no ciclo as plataformas de
+    # config.plataformas_ativas — nenhuma tentativa de upload é feita para
+    # quem não está na lista.
+    for plataforma in config.plataformas_ativas:
+        resultado_anterior = _resultado_anterior(entrada_existente, plataforma)
+        if resultado_anterior is not None:
+            logger.info(
+                "%s já tinha sucesso em %s, não reenviando", video.name, plataforma
+            )
+            resultados[plataforma] = resultado_anterior
+            continue
 
-    resultado_tiktok = _resultado_anterior(entrada_existente, "tiktok")
-    if resultado_tiktok is None:
-        tiktok_provider = TikTokProvider(
-            tokens_path=paths.TOKENS_TIKTOK_PATH,
-            app_credentials_path=paths.TIKTOK_APP_CREDENTIALS_PATH,
-            direct_post_enabled=config.tiktok_direct_post_enabled,
-            privacy_level=config.tiktok_privacy_level,
-        )
-        resultado_tiktok = tiktok_provider.publish(video, titulo, legenda)
-    else:
-        logger.info("%s já tinha sucesso no TikTok, não reenviando", video.name)
+        faltando = _credenciais_faltando(plataforma)
+        if faltando:
+            caminhos = ", ".join(str(c) for c in faltando)
+            logger.error(
+                "Credencial ausente para %s ao publicar %s — arquivo(s) "
+                "esperado(s) em: %s. Plataforma pulada, sem tentar upload.",
+                plataforma,
+                video.name,
+                caminhos,
+            )
+            resultados[plataforma] = PublishResult(
+                status="falha", error=f"Credencial ausente em: {caminhos}"
+            )
+            continue
 
-    ledger.registrar(
-        paths.LEDGER_PATH,
-        video.name,
-        hash_arquivo,
-        resultado_youtube,
-        resultado_tiktok,
-    )
+        provider = _construir_provider(plataforma, config)
+        resultados[plataforma] = provider.publish(video, titulo, legenda)
 
-    if resultado_youtube.status == "sucesso" and resultado_tiktok.status == "sucesso":
+    ledger.registrar(paths.LEDGER_PATH, video.name, hash_arquivo, resultados)
+
+    if all(r.status == "sucesso" for r in resultados.values()):
         _mover(video, paths.POSTADOS)
     else:
         destino = _mover(video, paths.FALHAS)
-        _gravar_sidecar_falha(destino, resultado_youtube, resultado_tiktok)
+        _gravar_sidecar_falha(destino, resultados)
 
 
 def _tick(

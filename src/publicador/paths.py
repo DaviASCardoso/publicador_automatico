@@ -23,3 +23,10 @@ TOKENS_YOUTUBE_PATH = APP_DATA_DIR / "tokens_youtube.json"
 TOKENS_TIKTOK_PATH = APP_DATA_DIR / "tokens_tiktok.json"
 CLIENT_SECRET_PATH = APP_DATA_DIR / "client_secret.json"
 TIKTOK_APP_CREDENTIALS_PATH = APP_DATA_DIR / "tiktok_app.json"
+
+# Arquivos que cada plataforma precisa ter presentes para poder publicar.
+# Usado para detectar credencial faltando ANTES de tentar o upload.
+CREDENCIAIS_POR_PLATAFORMA: dict[str, list[Path]] = {
+    "youtube": [CLIENT_SECRET_PATH, TOKENS_YOUTUBE_PATH],
+    "tiktok": [TIKTOK_APP_CREDENTIALS_PATH, TOKENS_TIKTOK_PATH],
+}

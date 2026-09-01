@@ -52,30 +52,40 @@ def buscar_publicacao(ledger_path: Path, hash_arquivo: str) -> dict | None:
     return None
 
 
-def ja_publicado_com_sucesso(entrada: dict | None) -> bool:
+def ja_publicado_com_sucesso(entrada: dict | None, plataformas: list[str]) -> bool:
+    """Já publicado com sucesso em TODAS as plataformas atualmente ativas.
+
+    Só considera `plataformas` (a lista atual de plataformas_ativas), não as
+    chaves que porventura existam na entrada do ledger — assim, ativar uma
+    plataforma nova depois não é confundido com "já publicado".
+    """
     if entrada is None:
         return False
-    return (
-        entrada.get("youtube", {}).get("status") == "sucesso"
-        and entrada.get("tiktok", {}).get("status") == "sucesso"
-    )
+    return all(entrada.get(p, {}).get("status") == "sucesso" for p in plataformas)
 
 
 def registrar(
     ledger_path: Path,
     arquivo: str,
     hash_arquivo: str,
-    youtube: PublishResult,
-    tiktok: PublishResult,
+    resultados: dict[str, PublishResult],
 ) -> None:
+    """Registra só as plataformas em `resultados` — ou seja, só as que
+    realmente foram tentadas nesse ciclo (plataformas desativadas não
+    entram)."""
     ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    plataformas_dump = {p: r.model_dump() for p, r in resultados.items()}
     entrada = {
         "arquivo": arquivo,
         "hash": hash_arquivo,
         "timestamp": datetime.now(_TZ_SAO_PAULO).isoformat(),
-        "youtube": youtube.model_dump(),
-        "tiktok": tiktok.model_dump(),
+        **plataformas_dump,
     }
     with ledger_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entrada, ensure_ascii=False) + "\n")
-    logger.info("Registrado no ledger: %s (hash=%s)", arquivo, hash_arquivo)
+    logger.info(
+        "Registrado no ledger: %s (hash=%s, plataformas=%s)",
+        arquivo,
+        hash_arquivo,
+        list(resultados),
+    )

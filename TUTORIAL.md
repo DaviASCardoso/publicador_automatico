@@ -207,6 +207,7 @@ Em `/srv/publicador/config.json` (crie se ainda não existir):
 ```json
 {
   "horario_publicacao": "18:00",
+  "plataformas_ativas": ["youtube", "tiktok"],
   "privacy_status_youtube": "private",
   "retencao_postados_dias": 7,
   "tiktok_direct_post_enabled": false,
@@ -215,12 +216,36 @@ Em `/srv/publicador/config.json` (crie se ainda não existir):
 ```
 
 - `horario_publicacao`: `"HH:MM"`, 24h.
+- `plataformas_ativas`: lista com as plataformas em que o daemon deve
+  publicar — aceita `"youtube"` e `"tiktok"`. Não pode ficar vazia. Se a
+  chave for omitida, o padrão é as duas ativas (`["youtube", "tiktok"]`), pra
+  não quebrar quem já está rodando sem essa chave no config.json.
+
+  **Para começar só com YouTube** (por exemplo, enquanto o audit do TikTok
+  não sai — seção 2.6), deixe a lista com um item só:
+  ```json
+  "plataformas_ativas": ["youtube"]
+  ```
+  Com isso o daemon nem tenta o TikTok: não instancia o provider, não gasta
+  chamada de API, e um vídeo publicado com sucesso só no YouTube já vai
+  direto pra `postados/` (não fica esperando o TikTok pra ser considerado
+  publicado). Quando as credenciais do TikTok estiverem prontas, basta
+  voltar a lista pra `["youtube", "tiktok"]` — não precisa reiniciar o
+  serviço, o daemon relê o config.json a cada minuto.
+
+  Se uma plataforma estiver na lista mas faltar o arquivo de credencial
+  correspondente (seção 3.3), o daemon não tenta o upload nem quebra: grava
+  no `publicador.log` uma linha dizendo qual credencial está faltando e em
+  qual caminho ela é esperada, e trata aquele vídeo como falha só daquela
+  plataforma (vai pra `falhas/` com o sidecar explicando, a não ser que as
+  outras plataformas ativas também tenham dado certo nesse vídeo antes).
 - `privacy_status_youtube`: `"private"`, `"unlisted"` ou `"public"` (veja
   seção 1.6 antes de usar `"public"`).
 - `retencao_postados_dias`: dias que um vídeo fica em `postados/` antes de ser
   apagado; `0` apaga imediatamente. Padrão: `7`.
 - `tiktok_direct_post_enabled`: deixe `false` até ter o audit do TikTok
-  aprovado (seção 2.6).
+  aprovado (seção 2.6). Só é relevante se `"tiktok"` estiver em
+  `plataformas_ativas`.
 - `tiktok_privacy_level`: obrigatório só se `tiktok_direct_post_enabled` for
   `true`. Um de `"PUBLIC_TO_EVERYONE"`, `"MUTUAL_FOLLOW_FRIENDS"`,
   `"FOLLOWER_OF_CREATOR"`, `"SELF_ONLY"`.

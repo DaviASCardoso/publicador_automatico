@@ -19,8 +19,14 @@ logger = logging.getLogger(__name__)
 _HORARIO_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 
 
+PlataformaConhecida = Literal["youtube", "tiktok"]
+
+
 class AppConfig(BaseModel):
     horario_publicacao: str
+    plataformas_ativas: list[PlataformaConhecida] = Field(
+        default_factory=lambda: ["youtube", "tiktok"], min_length=1
+    )
     privacy_status_youtube: Literal["private", "unlisted", "public"] = "private"
     retencao_postados_dias: int = Field(default=7, ge=0)
     tiktok_direct_post_enabled: bool = False
