@@ -51,17 +51,24 @@ class _LimitadorTaxa:
 class TikTokProvider:
     def __init__(
         self,
-        tokens: TikTokTokens,
+        tokens_path: Path,
+        app_credentials_path: Path,
         direct_post_enabled: bool,
         privacy_level: str | None,
     ) -> None:
-        self._tokens = tokens
+        self._tokens_path = tokens_path
+        self._app_credentials_path = app_credentials_path
         self._direct_post_enabled = direct_post_enabled
         self._privacy_level = privacy_level
         self._limitador = _LimitadorTaxa(_MAX_REQUISICOES_POR_MINUTO)
 
     def publish(self, file_path: Path, title: str, caption: str) -> PublishResult:
         try:
+            # Carregado aqui dentro (não no __init__) para que credenciais
+            # ausentes/inválidas virem PublishResult(status="falha") em vez
+            # de derrubar o daemon.
+            self._tokens = TikTokTokens(self._tokens_path, self._app_credentials_path)
+
             if self._direct_post_enabled:
                 self._validar_privacy_level()
 

@@ -20,7 +20,6 @@ from publicador import ledger, paths, state
 from publicador.config import AppConfig, load_config
 from publicador.file_watcher import arquivo_esta_estavel, proximo_video
 from publicador.logging_setup import setup_logging
-from publicador.oauth_tokens import TikTokTokens
 from publicador.providers.base import PublishResult
 from publicador.providers.tiktok import TikTokProvider
 from publicador.providers.youtube import YouTubeProvider
@@ -75,6 +74,19 @@ def _gravar_sidecar_falha(
     )
 
 
+def _resultado_anterior(
+    entrada_existente: dict | None, plataforma: str
+) -> PublishResult | None:
+    """Reaproveita o resultado de uma tentativa anterior (do ledger) se ela
+    já tinha tido sucesso nessa plataforma — evita reenviar/duplicar."""
+    if entrada_existente is None:
+        return None
+    dados = entrada_existente.get(plataforma, {})
+    if dados.get("status") != "sucesso":
+        return None
+    return PublishResult.model_validate(dados)
+
+
 def _publicar(video: Path, config: AppConfig, legenda: str) -> None:
     hash_arquivo = ledger.calcular_hash(video)
     entrada_existente = ledger.buscar_publicacao(paths.LEDGER_PATH, hash_arquivo)
@@ -89,22 +101,31 @@ def _publicar(video: Path, config: AppConfig, legenda: str) -> None:
 
     titulo = video.stem
 
-    youtube_provider = YouTubeProvider(
-        tokens_path=paths.TOKENS_YOUTUBE_PATH,
-        client_secret_path=paths.CLIENT_SECRET_PATH,
-        privacy_status=config.privacy_status_youtube,
-    )
-    tokens_tiktok = TikTokTokens(
-        paths.TOKENS_TIKTOK_PATH, paths.TIKTOK_APP_CREDENTIALS_PATH
-    )
-    tiktok_provider = TikTokProvider(
-        tokens=tokens_tiktok,
-        direct_post_enabled=config.tiktok_direct_post_enabled,
-        privacy_level=config.tiktok_privacy_level,
-    )
+    # Reprocessamento sem duplicar: se uma tentativa anterior (registrada no
+    # ledger por hash) já teve sucesso numa das duas plataformas, não
+    # reenvia pra ela — só tenta de novo a que falhou.
+    resultado_youtube = _resultado_anterior(entrada_existente, "youtube")
+    if resultado_youtube is None:
+        youtube_provider = YouTubeProvider(
+            tokens_path=paths.TOKENS_YOUTUBE_PATH,
+            client_secret_path=paths.CLIENT_SECRET_PATH,
+            privacy_status=config.privacy_status_youtube,
+        )
+        resultado_youtube = youtube_provider.publish(video, titulo, legenda)
+    else:
+        logger.info("%s já tinha sucesso no YouTube, não reenviando", video.name)
 
-    resultado_youtube = youtube_provider.publish(video, titulo, legenda)
-    resultado_tiktok = tiktok_provider.publish(video, titulo, legenda)
+    resultado_tiktok = _resultado_anterior(entrada_existente, "tiktok")
+    if resultado_tiktok is None:
+        tiktok_provider = TikTokProvider(
+            tokens_path=paths.TOKENS_TIKTOK_PATH,
+            app_credentials_path=paths.TIKTOK_APP_CREDENTIALS_PATH,
+            direct_post_enabled=config.tiktok_direct_post_enabled,
+            privacy_level=config.tiktok_privacy_level,
+        )
+        resultado_tiktok = tiktok_provider.publish(video, titulo, legenda)
+    else:
+        logger.info("%s já tinha sucesso no TikTok, não reenviando", video.name)
 
     ledger.registrar(
         paths.LEDGER_PATH,
