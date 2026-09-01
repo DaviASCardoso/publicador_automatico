@@ -1,0 +1,27 @@
+[project]
+name = "publicador"
+version = "0.1.0"
+description = "Daemon que publica automaticamente um vídeo por dia no YouTube e no TikTok"
+requires-python = ">=3.12"
+dependencies = [
+    "google-api-python-client>=2.140",
+    "google-auth-oauthlib>=1.2",
+    "google-auth>=2.34",
+    "requests>=2.32",
+    "pydantic>=2.8",
+    "tzdata>=2024.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/publicador"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
